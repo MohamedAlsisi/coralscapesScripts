@@ -22,12 +22,12 @@ This reads from `Sponges/Sponges_18167` and outputs the stratified dataset to `S
 
 ## 2. Training
 
-To train the Segformer model using the `sp10_strat` configuration (which uses class weighting and a batch size configured for 24GB GPUs):
+To train the Segformer model using the `sp10_strat` configuration:
 
 ```bash
 python -u benchmark_runs/train.py \
   --config configs/segformer-mit-b2-sponges_sp10_strat.yaml \
-  2>&1 | tee work_dir/sponges_train_strat.log
+  2>&1 | tee work_dir/sponges_train_strat16.log
 ```
 
 ## 3. Inference
