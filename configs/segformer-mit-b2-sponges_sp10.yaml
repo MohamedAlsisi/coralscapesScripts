@@ -1,0 +1,59 @@
+run_name: "segformer_mit_b2-sponges_sp10"
+
+data:
+  root: "/Sponges/Sponges_18167_sp10"
+  batch_size: 1 # Reduced for fine-tuning on potentially limited GPU mem if needed
+  batch_size_eval: 1
+  weight: False
+
+augmentation:
+  train:
+    RandomScale:
+      scale_limit: [0, 1]
+    RandomCrop:
+      width: 1024
+      height: 1024  
+    HorizontalFlip:
+      p: 0.5
+    Normalize:
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+  val:
+    Normalize:
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+  test:
+    Normalize:
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+      
+model:
+  name: "segformer-mit-b2"
+checkpoint: "/home/mohamed/student/mo/coralscapesScripts/model_checkpoints/segformer_mit_b2-sponges_sp10/model_epoch4_final"
+
+training:
+  epochs: 100
+  optimizer:
+    type: torch.optim.AdamW
+    lr: 0.00001 # lower LR for fine-tuning
+    weight_decay: 0.01
+  loss:
+    type: "cross_entropy"
+    ignore_index: 255
+  scheduler:
+    type: torch.optim.lr_scheduler.PolynomialLR
+    power: 1
+    total_iters: 100
+  preprocessor: "segformer"
+  eval: 
+    sliding_window: False
+    window: 1024
+    stride: 1024
+    transform_target: False # Some datasets don't need label transform if they are already in correct format
+
+logger:
+  wandb_project: "coralscapes-sponges"
+  wandb_disabled: true   # ← ADD THIS LINE
+  log_epochs: 1
+  checkpoint_dir: ".."
+
