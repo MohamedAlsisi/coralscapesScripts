@@ -24,9 +24,10 @@ from PIL import Image, ImageDraw
 from collections import defaultdict
 
 # ─── Config ──────────────────────────────────────────────────────────────────
-COCO_JSON   = "../Sponges/Sponges_18167/all.json"
-IMG_SRC     = "../Sponges/Sponges_18167/all"
-OUT_ROOT    = "../Sponges/Sponges_18167_sp10_strat"   # output directory
+COCO_JSON   = "Sponges/Sponges_18167/all.json"
+IMG_SRC     = "Sponges/Sponges_18167/all"
+OUT_ROOT_9  = "Sponges/Sponges_18167_sp9_strat"
+OUT_ROOT_10 = "Sponges/Sponges_18167_sp10_strat"
 
 SEED        = 42
 SPLIT       = (0.70, 0.15, 0.15)             # train / val / test
@@ -40,8 +41,8 @@ def make_dirs(root):
         os.makedirs(os.path.join(root, "gtFine",     split), exist_ok=True)
 
 
-def rasterize_mask(coco, image_id, cat2train, h, w):
-    """Return a uint8 H×W mask with background=0 and sponge classes 1..9."""
+def rasterize_mask(coco, image_id, cat2train, h, w, mode):
+    """Return a uint8 H×W mask with background=0 or 255 and sponge classes 1..9."""
     ann_by_img = getattr(rasterize_mask, "_cache", None)
     if ann_by_img is None:
         ann_by_img = defaultdict(list)
@@ -49,7 +50,11 @@ def rasterize_mask(coco, image_id, cat2train, h, w):
             ann_by_img[ann["image_id"]].append(ann)
         rasterize_mask._cache = ann_by_img
 
-    mask = np.zeros((h, w), dtype=np.uint8)
+    if mode == "ignore":
+        mask = np.full((h, w), 255, dtype=np.uint8)
+    else:
+        mask = np.zeros((h, w), dtype=np.uint8)
+
     for ann in ann_by_img.get(image_id, []):
         cls = int(cat2train[ann["category_id"]])
         seg = ann.get("segmentation", [])
@@ -171,7 +176,8 @@ def main():
 
     for i, image_id in enumerate(image_ids):
         im = imgs[image_id]
-        mask = rasterize_mask(coco, image_id, cat2train, im["height"], im["width"])
+        # mode="bg" is fine here, we just need the presence of 1..9 which is same for both
+        mask = rasterize_mask(coco, image_id, cat2train, im["height"], im["width"], mode="bg")
         presence_matrix[i] = class_presence_vector(mask, N_SPONGE_CLASSES)
 
     # ── Stratified split ─────────────────────────────────────────────────────
@@ -181,65 +187,66 @@ def main():
     print("\n=== Split Statistics (# images with each class present) ===")
     print_split_stats(split_ids, presence_matrix, image_ids, id2idx)
 
-    # ── Write dataset ────────────────────────────────────────────────────────
-    print(f"Writing dataset to: {OUT_ROOT}")
-    make_dirs(OUT_ROOT)
+    # Build dataset logic
+    def build_dataset(out_root, mode):
+        print(f"\nWriting dataset ({mode}) to: {out_root}")
+        make_dirs(out_root)
 
-    for split_name, ids in split_ids.items():
-        print(f"  Writing {split_name} ({len(ids)} images) …")
-        for image_id in ids:
-            im = imgs[image_id]
-            fn = im["file_name"]
-            h, w = im["height"], im["width"]
+        for split_name, ids in split_ids.items():
+            print(f"  Writing {split_name} ({len(ids)} images) …")
+            for image_id in ids:
+                im = imgs[image_id]
+                fn = im["file_name"]
+                h, w = im["height"], im["width"]
 
-            mask = rasterize_mask(coco, image_id, cat2train, h, w)
+                mask = rasterize_mask(coco, image_id, cat2train, h, w, mode)
 
-            # Copy image
-            src_img = os.path.join(IMG_SRC, fn)
-            dst_img = os.path.join(OUT_ROOT, "leftImg8bit", split_name, fn)
-            if os.path.exists(src_img):
-                shutil.copy2(src_img, dst_img)
-            else:
-                print(f"    [WARN] Image not found: {src_img}")
+                # Copy image
+                src_img = os.path.join(IMG_SRC, fn)
+                dst_img = os.path.join(out_root, "leftImg8bit", split_name, fn)
+                if os.path.exists(src_img):
+                    shutil.copy2(src_img, dst_img)
 
-            # Save mask
-            base      = os.path.splitext(fn)[0]
-            mask_name = base + "_labelIds.png"
-            dst_mask  = os.path.join(OUT_ROOT, "gtFine", split_name, mask_name)
-            Image.fromarray(mask).save(dst_mask)
+                # Save mask
+                base      = os.path.splitext(fn)[0]
+                mask_name = base + "_labelIds.png"
+                dst_mask  = os.path.join(out_root, "gtFine", split_name, mask_name)
+                Image.fromarray(mask).save(dst_mask)
 
-    # ── Save classes.json and colors.json ────────────────────────────────────
-    classes_json = {
-        "Ball Yellow Papillate Irregular": 1,
-        "Cup Beige Thick": 2,
-        "Cup Black Smooth": 3,
-        "Cup Orange": 4,
-        "Cup Red Smooth": 5,
-        "Cup Red Thick": 6,
-        "Cup Yellow": 7,
-        "Fan Pink": 8,
-        "Massive Purple": 9,
-    }
-    colors_json = {
-        "Ball Yellow Papillate Irregular": [255, 255, 0],
-        "Cup Beige Thick":                 [245, 245, 220],
-        "Cup Black Smooth":                [50,  50,  50],
-        "Cup Orange":                      [255, 165, 0],
-        "Cup Red Smooth":                  [255, 0,   0],
-        "Cup Red Thick":                   [139, 0,   0],
-        "Cup Yellow":                      [255, 215, 0],
-        "Fan Pink":                        [255, 192, 203],
-        "Massive Purple":                  [128, 0,   128],
-    }
-    with open(os.path.join(OUT_ROOT, "classes.json"), "w") as f:
-        json.dump(classes_json, f, indent=4)
-    with open(os.path.join(OUT_ROOT, "colors.json"), "w") as f:
-        json.dump(colors_json, f, indent=4)
+        # Save metadata classes.json and colors.json
+        classes_json = {
+            "Ball Yellow Papillate Irregular": 1,
+            "Cup Beige Thick": 2,
+            "Cup Black Smooth": 3,
+            "Cup Orange": 4,
+            "Cup Red Smooth": 5,
+            "Cup Red Thick": 6,
+            "Cup Yellow": 7,
+            "Fan Pink": 8,
+            "Massive Purple": 9,
+        }
+        colors_json = {
+            "Ball Yellow Papillate Irregular": [255, 255, 0],
+            "Cup Beige Thick":                 [245, 245, 220],
+            "Cup Black Smooth":                [50,  50,  50],
+            "Cup Orange":                      [255, 165, 0],
+            "Cup Red Smooth":                  [255, 0,   0],
+            "Cup Red Thick":                   [139, 0,   0],
+            "Cup Yellow":                      [255, 215, 0],
+            "Fan Pink":                        [255, 192, 203],
+            "Massive Purple":                  [128, 0,   128],
+        }
+        with open(os.path.join(out_root, "classes.json"), "w") as f:
+            json.dump(classes_json, f, indent=4)
+        with open(os.path.join(out_root, "colors.json"), "w") as f:
+            json.dump(colors_json, f, indent=4)
+        
+        print("\nDone! Dataset written to:", out_root)
+        
+    build_dataset(OUT_ROOT_10, mode="bg")
+    build_dataset(OUT_ROOT_9, mode="ignore")
 
-    print("\nDone! Dataset written to:", OUT_ROOT)
-    print("Next steps:")
-    print("  1. Update configs/segformer-mit-b2-sponges_sp10.yaml → data.root to point here")
-    print("  2. Set weight: True in the data section to enable class weights")
+    print("\nNext steps:")
     print("  3. Re-run training: python benchmark_runs/train.py --config configs/segformer-mit-b2-sponges_sp10.yaml")
 
 
